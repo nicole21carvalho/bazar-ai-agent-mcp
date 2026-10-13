@@ -1,4 +1,6 @@
-# Imagem do servidor MCP do Bazar.
+# Uma imagem, dois serviços: o agente (padrão) e o servidor MCP do Bazar.
+#   docker run IMAGEM                          → agente (porta 8000)
+#   docker run IMAGEM bazar_agente.mcp_bazar   → servidor MCP (porta 8090)
 # Etapa 1: instala as dependências com o uv, travadas pelo uv.lock.
 FROM python:3.14-slim AS build
 COPY --from=ghcr.io/astral-sh/uv:0.13.0 /uv /bin/uv
@@ -18,5 +20,6 @@ COPY --from=build /app/.venv /app/.venv
 ENV PATH="/app/.venv/bin:$PATH" PYTHONUNBUFFERED=1
 # Usuário sem privilégios, numérico: o Kubernetes consegue conferir que não é root.
 USER 10001:10001
-EXPOSE 8090
-ENTRYPOINT ["python", "-m", "bazar_agente.mcp_bazar"]
+EXPOSE 8000 8090
+ENTRYPOINT ["python", "-m"]
+CMD ["bazar_agente.agente"]
