@@ -4,7 +4,39 @@ Agente de IA que atende os clientes do [Bazar](https://github.com/nicole21carval
 consulta pedidos, mostra o catálogo e cria pedidos, sempre em nome do cliente logado, por meio de um
 servidor **MCP** (Model Context Protocol) próprio.
 
-> Em construção. Pronto até agora: servidor MCP e agente (fases 1 e 2 de 5).
+> Em construção. Pronto até agora: servidor MCP, agente e integração com o Bazar (fases 1 a 3 de 5).
+
+## Como as peças se encaixam
+
+```
+Painel do Bazar ──login PKCE──> Keycloak        token: aud = bazar-api, bazar-agente
+   │ chat (SSE)
+   ▼
+Agente (LangGraph) ──troca de token──> Keycloak  token: aud = bazar-mcp
+   │ MCP (Streamable HTTP)
+   ▼
+Servidor MCP do Bazar ──troca de token──> Keycloak  token: aud = bazar-api
+   │ REST
+   ▼
+API do Bazar (gateway → pedidos, estoque)
+```
+
+Cada elo só aceita o token emitido para ele, e cada troca gera um token novo, válido só para o próximo
+serviço, sempre em nome do mesmo cliente (`sub`). O job `keycloak-config` monta essa cadeia no Keycloak do
+Bazar na subida, sem mexer no arquivo de realm dele (e pode rodar de novo: só cria o que falta).
+
+## Rodando junto com o Bazar
+
+```bash
+# 1. No repositório do Bazar, com AGENTE_URL=http://localhost:8000 no .env dele:
+docker compose up -d --build
+
+# 2. Aqui (gere os dois segredos com: openssl rand -hex 24):
+cp .env.example .env
+docker compose up -d --build
+```
+
+Abra o painel em http://localhost:5173, entre e clique em **💬 Atendimento**.
 
 ## Agente (LangGraph)
 

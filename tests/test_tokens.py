@@ -132,3 +132,22 @@ async def test_troca_recusada_pelo_keycloak_vira_falha_de_autorizacao(troca: Tro
     respx.post(TOKEN_URL).respond(400, json={"error": "invalid_request"})
     with pytest.raises(FalhaDeAutorizacao):
         await troca.trocar("token-do-mcp", "bazar-api")
+
+
+@respx.mock
+async def test_keycloak_fora_do_ar_depois_do_cache_vencer_nao_derruba_quem_ja_estava_logado(
+    verificador: VerificadorJWT, emitir_token: EmitirToken, jwks: dict[str, Any]
+) -> None:
+    # Visto num teste real: o cache de chaves venceu, o Keycloak sobrecarregado não
+    # respondeu a tempo e todo token passou a ser recusado.
+    rota = respx.get(CHAVES_URL)
+    rota.respond(json=jwks)
+    assert await verificador.verify_token(emitir_token()) is not None
+
+    verificador._buscadas_em -= 3600  # o cache venceu há muito tempo
+    rota.mock(side_effect=httpx.ConnectTimeout("Keycloak lento"))
+    assert await verificador.verify_token(emitir_token()) is not None  # as chaves de antes valem
+    chamadas = rota.call_count
+    for _ in range(10):  # e não vira enxurrada de tentativas
+        await verificador.verify_token(emitir_token())
+    assert rota.call_count == chamadas

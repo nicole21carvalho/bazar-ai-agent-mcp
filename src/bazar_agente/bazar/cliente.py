@@ -72,10 +72,16 @@ class ClienteBazar:
         self, metodo: str, caminho: str, token: str | None = None, corpo: object | None = None
     ) -> httpx.Response:
         cabecalhos = {"Authorization": f"Bearer {token}"} if token else {}
-        try:
-            resposta = await self._http.request(metodo, caminho, headers=cabecalhos, json=corpo)
-        except httpx.HTTPError as erro:
-            raise BazarIndisponivel("O Bazar não respondeu. Tente de novo em instantes.") from erro
+        # Leitura que falhou na rede (serviço acordando, por exemplo) ganha mais uma
+        # tentativa. Criação de pedido não: repetir poderia criar dois pedidos.
+        tentativas = 2 if metodo == "GET" else 1
+        for tentativa in range(1, tentativas + 1):
+            try:
+                resposta = await self._http.request(metodo, caminho, headers=cabecalhos, json=corpo)
+                break
+            except httpx.TransportError as erro:
+                if tentativa == tentativas:
+                    raise BazarIndisponivel("O Bazar não respondeu. Tente de novo em instantes.") from erro
 
         match resposta.status_code:
             case code if code < 300:

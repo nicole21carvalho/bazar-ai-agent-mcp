@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 import httpx2
-from mcp import Client
+from mcp import Client, MCPError
 from mcp.client.streamable_http import streamable_http_client
 from mcp.types import CallToolResult, TextContent, Tool
 
@@ -70,7 +70,16 @@ class FerramentasMCP:
         return self._definicoes
 
     async def chamar(self, nome: str, argumentos: dict[str, Any]) -> Resultado:
-        resultado = await self._cliente.call_tool(nome, argumentos)
+        try:
+            resultado = await self._cliente.call_tool(nome, argumentos)
+        except (MCPError, httpx2.HTTPError) as erro:
+            # Sessão expirada ou servidor fora do ar: o modelo explica ao cliente, em
+            # vez de a conversa cair inteira.
+            return Resultado(
+                texto=f"Não consegui falar com a loja agora ({type(erro).__name__}). "
+                "Peça ao cliente para tentar de novo em instantes.",
+                erro=True,
+            )
         return Resultado(texto=_texto(resultado), erro=bool(resultado.is_error))
 
 

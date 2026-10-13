@@ -99,3 +99,15 @@ async def test_catalogo_real_passa_pela_protecao_de_dados(ferramentas: Ferrament
     dado = str(next(m for m in modelo.recebidas[1] if isinstance(m, ToolMessage)).content)
     assert dado.startswith("<dados_da_ferramenta>")
     assert "Café especial 250 g" in dado
+
+
+async def test_sessao_mcp_que_cai_vira_erro_para_o_modelo_e_nao_derruba_a_conversa() -> None:
+    from mcp import MCPError
+
+    class ClienteQueCai:
+        async def call_tool(self, nome: str, argumentos: dict[str, object]) -> None:
+            raise MCPError(code=-32001, message="Unauthorized")
+
+    resultado = await FerramentasMCP(ClienteQueCai()).chamar("listar_meus_pedidos", {})  # type: ignore[arg-type]
+    assert resultado.erro
+    assert "tentar de novo" in resultado.texto

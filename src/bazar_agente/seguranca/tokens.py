@@ -99,7 +99,18 @@ class VerificadorJWT:
             # Busca de novo quando o cache vence, ou quando aparece uma chave nova
             # e a última busca não foi há pouco.
             if idade >= CACHE_CHAVES_S or (kid not in self._chaves and idade >= INTERVALO_MINIMO_S):
-                await self._buscar_chaves()
+                try:
+                    await self._buscar_chaves()
+                except httpx.HTTPError as erro:
+                    if not self._chaves:
+                        raise
+                    # Keycloak fora do ar por um instante: as chaves que já temos
+                    # continuam valendo (ele não as descarta de uma hora para outra),
+                    # em vez de recusar o token de todo mundo. Nova tentativa em 30 s.
+                    log.warning(
+                        "chaves do Keycloak indisponiveis (%s): usando as de antes", type(erro).__name__
+                    )
+                    self._buscadas_em = time.monotonic() - CACHE_CHAVES_S + INTERVALO_MINIMO_S
         return self._chaves.get(kid)
 
     async def _buscar_chaves(self) -> None:

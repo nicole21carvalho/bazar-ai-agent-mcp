@@ -197,3 +197,39 @@ async def test_sessao_expirada_vira_evento_de_erro_e_nao_trava_a_conversa(
         segunda = await cliente.post(f"/api/conversas/{conversa}/mensagens", json={"texto": "oi"})
     assert ("erro", {"mensagem": "Sua sessão expirou. Entre de novo no Bazar."}) in eventos(primeira.text)
     assert segunda.status_code == 200  # a conversa não ficou presa como "em andamento"
+
+
+@respx.mock
+async def test_etapa_que_passa_do_tempo_vira_aviso_e_nao_trava_a_conversa(token: str) -> None:
+    import anyio
+    from langchain_core.callbacks import AsyncCallbackManagerForLLMRun
+    from langchain_core.outputs import ChatResult
+
+    class ModeloLento(ModeloRoteirizado):
+        async def _agenerate(
+            self,
+            messages: Any,
+            stop: Any = None,
+            run_manager: AsyncCallbackManagerForLLMRun | None = None,
+            **kw: Any,
+        ) -> ChatResult:
+            await anyio.sleep(5)
+            return self._generate(messages)
+
+    amb = Ambiente([AIMessage("tarde demais")])
+    amb.app = criar_app(
+        ConfigAgente(emissor=EMISSOR, tempo_maximo_etapa_s=0.2),
+        modelo=ModeloLento(roteiro=[AIMessage("tarde demais"), AIMessage("agora sim")]),
+        verificador=VerificadorJWT(httpx.AsyncClient(), CHAVES_URL, EMISSOR, "bazar-agente", "bazar-agente"),
+        trocador=amb.trocador,
+        abrir_ferramentas=lambda token: _sessao_vazia(amb),
+    )
+    conversa = uuid4()
+    async with amb.http(token) as cliente:
+        resposta = await cliente.post(f"/api/conversas/{conversa}/mensagens", json={"texto": "oi"})
+    assert ("erro", {"mensagem": "Demorei demais para responder. Tente de novo."}) in eventos(resposta.text)
+
+
+@asynccontextmanager
+async def _sessao_vazia(amb: Ambiente) -> AsyncIterator[Ferramentas]:
+    yield amb.ferramentas

@@ -1,0 +1,118 @@
+# O agente junto do Bazar. Suba o Bazar antes, no repositório dele:
+#   docker compose up -d
+# e depois, aqui:
+#   docker compose up -d --build
+# Este compose entra na rede do Bazar (bazar_default) e configura o Keycloak dele.
+
+name: bazar-agente
+
+x-seguro: &seguro
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  tmpfs: ["/tmp"]
+
+x-keycloak: &keycloak
+  # O "iss" dos tokens é o endereço que o navegador usa; as chaves e as trocas de
+  # token vão pelo endereço interno.
+  EMISSOR: http://localhost:8180/realms/bazar
+  KEYCLOAK_INTERNO: http://keycloak:8080/realms/bazar
+
+services:
+  # Roda uma vez: cria (ou acerta) os clientes do agente e do servidor MCP no
+  # Keycloak do Bazar e liga a troca de token entre eles.
+  keycloak-config:
+    build: .
+    <<: *seguro
+    command: ["bazar_agente.keycloak_config"]
+    env_file:
+      # A senha de admin do Keycloak fica só no .env do Bazar.
+      - path: ${BAZAR_DIR:-../bazar-microservices-kafka}/.env
+        required: true
+    environment:
+      KEYCLOAK_URL: http://keycloak:8080
+      BAZAR_AGENTE_CLIENTE_SEGREDO: ${AGENTE_SEGREDO:?defina no .env}
+      BAZAR_MCP_CLIENTE_SEGREDO: ${MCP_SEGREDO:?defina no .env}
+
+  mcp:
+    build: .
+    <<: *seguro
+    command: ["bazar_agente.mcp_bazar"]
+    environment:
+      BAZAR_MCP_API_URL: http://gateway:8080
+      BAZAR_MCP_URL_PUBLICA: http://mcp:8090/mcp
+      BAZAR_MCP_EMISSOR: http://localhost:8180/realms/bazar
+      BAZAR_MCP_KEYCLOAK_INTERNO: http://keycloak:8080/realms/bazar
+      BAZAR_MCP_CLIENTE_SEGREDO: ${MCP_SEGREDO:?defina no .env}
+      BAZAR_MCP_HOSTS_PERMITIDOS: '["mcp:8090"]'
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8090/saude')"]
+      interval: 10s
+      retries: 12
+    depends_on:
+      keycloak-config:
+        condition: service_completed_successfully
+
+  agente:
+    build: .
+    <<: *seguro
+    environment:
+      BAZAR_AGENTE_MCP_URL: http://mcp:8090/mcp
+      BAZAR_AGENTE_EMISSOR: http://localhost:8180/realms/bazar
+      BAZAR_AGENTE_KEYCLOAK_INTERNO: http://keycloak:8080/realms/bazar
+      BAZAR_AGENTE_CLIENTE_SEGREDO: ${AGENTE_SEGREDO:?defina no .env}
+      BAZAR_AGENTE_PROVEDOR: ${PROVEDOR:-ollama}
+      BAZAR_AGENTE_MODELO: ${MODELO:-qwen3:4b}
+      BAZAR_AGENTE_ANTHROPIC_CHAVE: ${ANTHROPIC_CHAVE:-}
+      BAZAR_AGENTE_OLLAMA_URL: http://ollama:11434
+      BAZAR_AGENTE_ORIGENS_CORS: '["http://localhost:5173"]'
+    ports:
+      # Só neste computador: o painel do Bazar (localhost:5173) chama daqui.
+      - "127.0.0.1:8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8000/saude')"]
+      interval: 10s
+      retries: 12
+    depends_on:
+      mcp:
+        condition: service_healthy
+      ollama-modelo:
+        condition: service_completed_successfully
+
+  # Modelo de linguagem local. Sem placa de vídeo, responde em dezenas de segundos.
+  ollama:
+    image: ollama/ollama:0.35.1
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    volumes:
+      - modelos:/root/.ollama
+    environment:
+      OLLAMA_NUM_PARALLEL: "1"
+      OLLAMA_KEEP_ALIVE: 30m
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      retries: 12
+
+  # Baixa o modelo só se ele ainda não estiver no volume: depois da primeira vez,
+  # sobe até sem internet.
+  ollama-modelo:
+    image: ollama/ollama:0.35.1
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      OLLAMA_HOST: ollama:11434
+      MODELO: ${MODELO:-qwen3:4b}
+    entrypoint: ["sh", "-c", "ollama show \"$$MODELO\" >/dev/null 2>&1 || ollama pull \"$$MODELO\""]
+    depends_on:
+      ollama:
+        condition: service_healthy
+
+networks:
+  default:
+    name: bazar_default
+    external: true
+
+volumes:
+  modelos:
+    name: ${OLLAMA_VOLUME:-bazar_agente_modelos}

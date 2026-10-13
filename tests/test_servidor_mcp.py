@@ -181,3 +181,22 @@ async def test_sem_usuario_autenticado_nada_funciona() -> None:
         resultado = await cliente.call_tool("listar_produtos", {})
     assert resultado.is_error
     assert "não autenticado" in str(resultado.content)
+
+
+async def test_leitura_que_falha_na_rede_tenta_de_novo_uma_vez(cliente_mcp: Client) -> None:
+    with respx.mock(base_url=API_URL) as bazar:
+        bazar.get("/api/pedidos").mock(
+            side_effect=[httpx.ReadTimeout("acordando"), httpx.Response(200, json=[])]
+        )
+        resultado = await cliente_mcp.call_tool("listar_meus_pedidos", {})
+    assert not resultado.is_error
+
+
+async def test_criacao_que_falha_na_rede_nao_repete_para_nao_duplicar_o_pedido(cliente_mcp: Client) -> None:
+    with respx.mock(base_url=API_URL) as bazar:
+        rota = bazar.post("/api/pedidos").mock(side_effect=httpx.ReadTimeout("lento"))
+        resultado = await cliente_mcp.call_tool(
+            "criar_pedido", {"itens": [{"produto_id": "cafe-especial", "quantidade": 1}]}
+        )
+    assert resultado.is_error
+    assert rota.call_count == 1

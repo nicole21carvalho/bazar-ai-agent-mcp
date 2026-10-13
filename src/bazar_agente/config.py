@@ -65,3 +65,6 @@ class ConfigAgente(_ComKeycloak, env_prefix="BAZAR_AGENTE_", extra="ignore"):
     # Limites de uso por cliente.
     mensagens_por_minuto: int = 10
     tamanho_maximo_mensagem: int = 2000
+    # Cada etapa do grafo (uma chamada ao modelo ou uma rodada de ferramentas) não
+    # passa disto. Generoso porque, sem placa de vídeo, o modelo leva minutos.
+    tempo_maximo_etapa_s: float = 600

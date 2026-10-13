@@ -80,6 +80,7 @@ def criar_app(
     checkpointer: BaseCheckpointSaver[Any] | None = None,
 ) -> FastAPI:
     grafo = construir_grafo(checkpointer or InMemorySaver())
+    grafo.step_timeout = config.tempo_maximo_etapa_s
     limite = LimiteDeUso(config.mensagens_por_minuto)
     em_andamento: set[str] = set()
 
@@ -158,6 +159,10 @@ def criar_app(
         except FalhaDeAutorizacao:
             yield ServerSentEvent(
                 event="erro", data={"mensagem": "Sua sessão expirou. Entre de novo no Bazar."}
+            )
+        except TimeoutError:
+            yield ServerSentEvent(
+                event="erro", data={"mensagem": "Demorei demais para responder. Tente de novo."}
             )
         except Exception as erro:
             # Nada do conteúdo da conversa no log: só o tipo do erro.
