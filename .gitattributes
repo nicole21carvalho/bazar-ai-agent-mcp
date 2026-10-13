@@ -1,0 +1,5 @@
+# Texto sempre com LF: scripts e configs copiados para imagens Linux quebram com CRLF.
+* text=auto eol=lf
+
+*.png binary
+*.gif binary

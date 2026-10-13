@@ -1,0 +1,57 @@
+[project]
+name = "bazar-agente"
+version = "0.1.0"
+description = "Agente de atendimento do Bazar: LangGraph + MCP, com troca de token (RFC 8693) e avaliações automáticas"
+readme = "README.md"
+authors = [
+    { name = "nicole21carvalho", email = "163887647+nicole21carvalho@users.noreply.github.com" }
+]
+requires-python = ">=3.14"
+dependencies = [
+    "httpx>=0.28",
+    "mcp>=2.3,<3",
+    "pydantic>=2.14",
+    "pydantic-settings>=2.11",
+    "pyjwt[crypto]>=2.15",
+    "uvicorn>=0.54",
+]
+
+[project.scripts]
+bazar-mcp = "bazar_agente.mcp_bazar.__main__:main"
+
+[build-system]
+requires = ["uv_build>=0.13.0,<0.14.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "anyio>=4",
+    "mypy>=2.4",
+    "pytest>=9.1",
+    "respx>=0.23",
+    "ruff>=0.17",
+]
+
+[tool.ruff]
+line-length = 110
+target-version = "py314"
+
+[tool.ruff.lint]
+# Erros, estilo, imports, bugs comuns, seguranca (bandit), simplificacoes e modernizacao.
+select = ["E", "F", "W", "I", "B", "S", "UP", "SIM", "RUF", "ASYNC", "PT"]
+ignore = ["RUF001", "RUF002", "RUF003"]  # acentos em portugues nao sao caracteres ambiguos
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S105", "S106"]  # assert e "senhas" de teste sao esperados nos testes
+
+[tool.mypy]
+strict = true
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = ["respx.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
