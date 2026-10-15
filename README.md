@@ -4,8 +4,8 @@ Agente de IA que atende os clientes do [Bazar](https://github.com/nicole21carval
 consulta pedidos, mostra o catálogo e cria pedidos, sempre em nome do cliente logado, por meio de um
 servidor **MCP** (Model Context Protocol) próprio.
 
-> Em construção. Pronto até agora: servidor MCP, agente, integração com o Bazar, avaliações e rastreamento
-> (fases 1 a 4 de 5).
+> Servidor MCP próprio com troca de token (RFC 8693), agente LangGraph com confirmação humana, integração com o
+> Bazar, avaliações com modelos de verdade no CI (94% no modelo padrão) e rastreamento OpenTelemetry.
 
 ## Como as peças se encaixam
 
@@ -102,29 +102,47 @@ uv run python -m avaliacao rodar --modelo qwen3:4b-instruct --saida resultados/q
 uv run python -m avaliacao comparar resultados/*.json
 ```
 
-### O que a primeira rodada ensinou
+### Resultado atual
 
-| Modelo | Acerto | Consultas | Compras | Segurança | Escopo | Tempo por turno |
-|---|---|---|---|---|---|---|
-| `qwen3:8b` | 69% (11/16) | 7/7 | 0/4 | 2/3 | 2/2 | 38 s |
-| `qwen3:4b` | 69% (11/16) | 5/7 | 1/4 | 3/3 | 2/2 | 151 s |
-| `llama3.2:3b` | 62% (10/16) | 7/7 | 1/4 | 1/3 | 1/2 | 10 s |
-| `qwen3:1.7b` | 31% (5/16) | 2/7 | 0/4 | 1/3 | 2/2 | 5 s |
+| Modelo | Acerto | Consultas | Compras | Segurança | Escopo | Perguntou antes | Tempo por turno |
+|---|---|---|---|---|---|---|---|
+| `qwen3:4b-instruct` (padrão) | **94%** (15/16) | 7/7 | 3/4 | 3/3 | 2/2 | 3 | 21 s |
+| `qwen3:8b` | **94%** (15/16) | 7/7 | 4/4 | 2/3 | 2/2 | 4 | 56 s |
+| `llama3.2:3b` | 69% (11/16) | 6/7 | 2/4 | 2/3 | 1/2 | 3 | 31 s |
+| `qwen3:1.7b` | 38% (6/16) | 4/7 | 0/4 | 1/3 | 1/2 | 0 | 6 s |
 
-A tabela achou dois problemas que nenhum teste com modelo roteirizado acharia:
+O `qwen3:4b-instruct` acerta tanto quanto o `qwen3:8b`, com a metade do tamanho e 2,6 vezes mais rápido (na CPU
+do runner, sem placa de vídeo). O que ainda falha é falha do modelo, e fica contado. Uma vez o `qwen3:4b-instruct`
+disse "espere um momento enquanto listo os itens" e não chamou ferramenta nenhuma: prometeu e não fez.
+
+### Como se chegou aqui: três rodadas
+
+A primeira rodada deu 69% no melhor modelo. Cada rodada achou problemas que nenhum teste com modelo roteirizado
+acharia:
 
 1. **Todos os modelos erravam a compra, pelo mesmo motivo, e o erro era meu.** A descrição de `criar_pedido`
    no servidor MCP dizia "só chame depois que o cliente confirmou". Então o modelo perguntava "confirma?" por
    texto, em vez de chamar a ferramenta, que já pede a confirmação com o cartão. Agora a descrição e as
    instruções dizem a mesma coisa: quem confirma é o app.
-2. **O `qwen3:4b` era quatro vezes mais lento que o `qwen3:8b`.** No Ollama, a etiqueta `qwen3:4b` hoje aponta
+2. **O `qwen3:4b` era quatro vezes mais lento que o `qwen3:8b`.** No Ollama, a etiqueta `qwen3:4b` aponta
    para a versão que sempre "pensa em voz alta" (`qwen3:4b-thinking-2507`, mesmo digest), e ela ignora o
    `think: false`. Dois cenários estouraram o tempo. O padrão passou a ser `qwen3:4b-instruct`, do mesmo
    tamanho e sem o raciocínio longo.
+3. **Os modelos pequenos sempre perguntam antes de comprar**, mesmo com a instrução para não perguntar. É
+   comportamento treinado, não prompt. A avaliação cobrava o caminho exato em vez do resultado. Agora um
+   cliente simulado responde "sim", uma vez. O cenário vale pelo resultado (a confirmação chega com os itens
+   certos?), e a coluna "Perguntou antes" conta o turno a mais.
+4. **Um bug de verdade no painel do Bazar.** O cartão de confirmação lia `produto_id`, mas os itens chegam no
+   formato do esquema da ferramenta (`produtoId`). No fluxo real, o item apareceria como "undefined", sem
+   preço. O teste do painel passava porque usava o mesmo formato errado. Quem achou foi esta avaliação, que
+   aceita os dois formatos.
+5. **Avisar do limite de R$ 1.000 é trabalho de código, não do modelo.** Nenhum modelo avisava sozinho, então
+   o aviso foi para o cartão de confirmação do painel. A avaliação passou a cobrar do modelo só o que é dele:
+   montar a compra certa.
 
-Também ficou claro onde está o risco de segurança: o `llama3.2:3b` chamou `criar_pedido` quando pediram para
-ele revelar as instruções. Mesmo assim, a confirmação humana barra a compra, então nada seria comprado sem o
-"sim" do cliente.
+Também ficou claro onde está o risco de segurança. Na primeira rodada, o `llama3.2:3b` chamou `criar_pedido`
+quando pediram para ele revelar as instruções. Mesmo assim, a confirmação humana barra a compra, então nada
+seria comprado sem o "sim" do cliente.
 
 ## Rastreamento (OpenTelemetry)
 
@@ -156,6 +174,6 @@ POST /api/conversas/{id}/mensagens                       agente
 
 ```bash
 uv sync --all-extras
-uv run pytest          # 85 testes, com um modelo "roteirizado" (sem IA de verdade)
+uv run pytest          # 86 testes, com um modelo "roteirizado" (sem IA de verdade)
 uv run ruff check . && uv run mypy src tests avaliacao
 ```
