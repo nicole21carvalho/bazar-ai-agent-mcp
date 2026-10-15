@@ -29,6 +29,7 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
 from mcp.server.auth.provider import AccessToken, TokenVerifier
+from opentelemetry.trace import Span, StatusCode
 from pydantic import BaseModel, Field
 
 from bazar_agente.agente.ferramentas import Ferramentas
@@ -36,6 +37,7 @@ from bazar_agente.agente.grafo import Contexto, construir_grafo
 from bazar_agente.agente.protecoes import limpar_mensagem
 from bazar_agente.config import ConfigAgente
 from bazar_agente.mcp_bazar.servidor import Trocador
+from bazar_agente.observabilidade import rastreador
 from bazar_agente.seguranca.tokens import FalhaDeAutorizacao
 
 log = logging.getLogger(__name__)
@@ -145,31 +147,47 @@ def criar_app(
             yield ServerSentEvent(event="erro", data={"mensagem": "Espere a resposta anterior terminar."})
             return
         em_andamento.add(chave)
-        try:
-            token_mcp = await trocador.trocar(acesso.token, config.audiencia_mcp)
-            async with abrir_ferramentas(token_mcp) as ferramentas:
-                ctx = Contexto(
-                    modelo=modelo, ferramentas=ferramentas, definicoes=await ferramentas.definicoes()
+        # Um span por mensagem (ou confirmação): modelo, ferramentas e MCP ficam dentro dele.
+        # Do cliente, só o id da conversa (escolhido pelo painel); o "sub" não vai.
+        with rastreador.start_as_current_span(
+            f"invoke_agent {grafo.name}",
+            attributes={
+                "gen_ai.operation.name": "invoke_agent",
+                "gen_ai.agent.name": grafo.name,
+                "gen_ai.conversation.id": chave.rsplit(":", 1)[-1],
+                "bazar.retomada": isinstance(entrada, Command),
+            },
+        ) as span:
+            try:
+                token_mcp = await trocador.trocar(acesso.token, config.audiencia_mcp)
+                async with abrir_ferramentas(token_mcp) as ferramentas:
+                    ctx = Contexto(
+                        modelo=modelo, ferramentas=ferramentas, definicoes=await ferramentas.definicoes()
+                    )
+                    async for modo, dado in grafo.astream(
+                        entrada, cfg, context=ctx, stream_mode=["messages", "updates"]
+                    ):
+                        for evento in _eventos(modo, dado):
+                            if evento.event == "confirmacao":
+                                span.set_attribute("bazar.aguardando_confirmacao", True)
+                            yield evento
+            except FalhaDeAutorizacao:
+                _falhou(span, "falha_de_autorizacao")
+                yield ServerSentEvent(
+                    event="erro", data={"mensagem": "Sua sessão expirou. Entre de novo no Bazar."}
                 )
-                async for modo, dado in grafo.astream(
-                    entrada, cfg, context=ctx, stream_mode=["messages", "updates"]
-                ):
-                    for evento in _eventos(modo, dado):
-                        yield evento
-        except FalhaDeAutorizacao:
-            yield ServerSentEvent(
-                event="erro", data={"mensagem": "Sua sessão expirou. Entre de novo no Bazar."}
-            )
-        except TimeoutError:
-            yield ServerSentEvent(
-                event="erro", data={"mensagem": "Demorei demais para responder. Tente de novo."}
-            )
-        except Exception as erro:
-            # Nada do conteúdo da conversa no log: só o tipo do erro.
-            log.exception("falha no atendimento: %s", type(erro).__name__)
-            yield ServerSentEvent(event="erro", data={"mensagem": "O atendente está indisponível agora."})
-        finally:
-            em_andamento.discard(chave)
+            except TimeoutError:
+                _falhou(span, "tempo_esgotado")
+                yield ServerSentEvent(
+                    event="erro", data={"mensagem": "Demorei demais para responder. Tente de novo."}
+                )
+            except Exception as erro:
+                # Nada do conteúdo da conversa no log nem no trace: só o tipo do erro.
+                log.exception("falha no atendimento: %s", type(erro).__name__)
+                _falhou(span, type(erro).__qualname__)
+                yield ServerSentEvent(event="erro", data={"mensagem": "O atendente está indisponível agora."})
+            finally:
+                em_andamento.discard(chave)
         yield ServerSentEvent(event="fim", data={})
 
     @app.post("/api/conversas/{conversa_id}/mensagens", response_class=EventSourceResponse)
@@ -195,6 +213,11 @@ def criar_app(
         return {"status": "ok"}
 
     return app
+
+
+def _falhou(span: Span, tipo: str) -> None:
+    span.set_attribute("error.type", tipo)
+    span.set_status(StatusCode.ERROR)
 
 
 def _eventos(modo: str, dado: Any) -> list[ServerSentEvent]:

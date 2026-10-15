@@ -7,6 +7,10 @@ from typing import Any
 import jwt
 import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
+from opentelemetry import trace
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
 EMISSOR = "http://keycloak.teste/realms/bazar"
 CHAVES_URL = f"{EMISSOR}/protocol/openid-connect/certs"
@@ -20,6 +24,23 @@ EmitirToken = Callable[..., str]
 @pytest.fixture
 def anyio_backend() -> str:
     return "asyncio"
+
+
+@pytest.fixture(scope="session")
+def _exportador() -> InMemorySpanExporter:
+    # O provedor global do OpenTelemetry só pode ser definido uma vez por processo.
+    exportador = InMemorySpanExporter()
+    provedor = TracerProvider()
+    provedor.add_span_processor(SimpleSpanProcessor(exportador))
+    trace.set_tracer_provider(provedor)
+    return exportador
+
+
+@pytest.fixture
+def spans(_exportador: InMemorySpanExporter) -> InMemorySpanExporter:
+    """Os spans criados durante o teste (e só os dele)."""
+    _exportador.clear()
+    return _exportador
 
 
 @pytest.fixture(scope="session")

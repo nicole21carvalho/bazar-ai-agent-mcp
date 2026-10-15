@@ -20,9 +20,11 @@ from langgraph.graph.message import add_messages
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.runtime import Runtime
 from langgraph.types import interrupt
+from opentelemetry.trace import SpanKind, StatusCode
 
 from bazar_agente.agente.ferramentas import DefinicaoFerramenta, Ferramentas
 from bazar_agente.agente.protecoes import INSTRUCOES, proteger_dados
+from bazar_agente.observabilidade import anotar_resposta, atributos_do_modelo, rastreador
 
 # Rodadas de ferramenta por mensagem do cliente: depois disso, o modelo responde
 # sem ferramentas (nada de laço infinito gastando chamadas).
@@ -51,7 +53,14 @@ async def chamar_modelo(state: Estado, *, runtime: Runtime[Contexto]) -> dict[st
     modelo: Any = ctx.modelo
     if state["rodadas"] < MAX_RODADAS:
         modelo = modelo.bind_tools([d.para_modelo() for d in ctx.definicoes])
-    resposta = await modelo.ainvoke([SystemMessage(INSTRUCOES), *recortar(state["mensagens"], JANELA)])
+    atributos = atributos_do_modelo(ctx.modelo)
+    with rastreador.start_as_current_span(
+        f"chat {atributos['gen_ai.request.model']}",
+        kind=SpanKind.CLIENT,
+        attributes={"gen_ai.operation.name": "chat", **atributos},
+    ) as span:
+        resposta = await modelo.ainvoke([SystemMessage(INSTRUCOES), *recortar(state["mensagens"], JANELA)])
+        anotar_resposta(span, resposta)
     return {"mensagens": [resposta]}
 
 
@@ -89,14 +98,33 @@ async def executar_ferramentas(state: Estado, *, runtime: Runtime[Contexto]) -> 
     mensagens: list[ToolMessage] = []
     for chamada in ultima.tool_calls:
         definicao = por_nome.get(chamada["name"])
-        if (motivo := problemas[str(chamada["id"])]) is not None or definicao is None:
-            conteudo, erro = motivo or "", True
-        elif not definicao.somente_leitura and not confirmadas.get(str(chamada["id"])):
-            conteudo = "O cliente NÃO confirmou: nada foi feito. Pergunte o que ele quer mudar."
-            erro = False
-        else:
-            resultado = await ctx.ferramentas.chamar(chamada["name"], chamada["args"])
-            conteudo, erro = proteger_dados(resultado.texto), resultado.erro
+        with rastreador.start_as_current_span(
+            f"execute_tool {chamada['name']}",
+            attributes={
+                "gen_ai.operation.name": "execute_tool",
+                "gen_ai.tool.name": chamada["name"],
+                "gen_ai.tool.call.id": str(chamada["id"]),
+                "gen_ai.tool.type": "function",
+            },
+        ) as span:
+            if definicao is None:
+                conteudo, erro, desfecho = problemas[str(chamada["id"])] or "", True, "ferramenta_inexistente"
+            elif (motivo := problemas[str(chamada["id"])]) is not None:
+                conteudo, erro, desfecho = motivo, True, "argumentos_invalidos"
+            elif not definicao.somente_leitura and not confirmadas.get(str(chamada["id"])):
+                conteudo = "O cliente NÃO confirmou: nada foi feito. Pergunte o que ele quer mudar."
+                erro, desfecho = False, "nao_confirmada"
+            else:
+                # O SDK do MCP abre aqui dentro o span da chamada e leva o trace adiante.
+                resultado = await ctx.ferramentas.chamar(chamada["name"], chamada["args"])
+                conteudo, erro = proteger_dados(resultado.texto), resultado.erro
+                desfecho = "erro_da_ferramenta" if erro else "executada"
+            span.set_attribute("bazar.ferramenta.desfecho", desfecho)
+            if definicao is not None:
+                span.set_attribute("bazar.ferramenta.somente_leitura", definicao.somente_leitura)
+            if erro:
+                span.set_attribute("error.type", desfecho)
+                span.set_status(StatusCode.ERROR)
         mensagens.append(
             ToolMessage(
                 content=conteudo,

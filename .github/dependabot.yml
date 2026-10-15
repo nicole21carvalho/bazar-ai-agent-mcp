@@ -1,0 +1,33 @@
+# PR semanal quando sai versao nova. Sem isto, as actions fixadas por SHA e as
+# dependencias travadas no uv.lock envelheceriam em silencio.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      # Pacotes que sobem juntos; separados, um PR quebraria o outro.
+      langchain:
+        patterns: ["langchain*", "langgraph*"]
+      opentelemetry:
+        patterns: ["opentelemetry*"]
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    ignore:
+      # Versao maior do Python e trocada a mao, aqui, no pyproject e no CI juntos.
+      - dependency-name: python
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule:
+      interval: weekly

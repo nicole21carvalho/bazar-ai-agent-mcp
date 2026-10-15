@@ -6,17 +6,19 @@ from functools import partial
 import httpx
 import uvicorn
 from fastapi import FastAPI
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
 from bazar_agente.agente.api import criar_app
 from bazar_agente.agente.ferramentas import sessao_mcp
 from bazar_agente.agente.modelos import criar_modelo
 from bazar_agente.config import ConfigAgente
+from bazar_agente.observabilidade import configurar_rastreamento
 from bazar_agente.seguranca.tokens import TrocaDeToken, VerificadorJWT
 
 
 def montar(config: ConfigAgente) -> FastAPI:
     http_keycloak = httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=3.0))
-    return criar_app(
+    app = criar_app(
         config,
         modelo=criar_modelo(config),
         verificador=VerificadorJWT(
@@ -29,6 +31,9 @@ def montar(config: ConfigAgente) -> FastAPI:
         trocador=TrocaDeToken(http_keycloak, config.token_url, config.cliente_id, config.cliente_segredo),
         abrir_ferramentas=partial(sessao_mcp, str(config.mcp_url)),
     )
+    # Span de cada requisição HTTP; a sonda de saúde do container fica de fora.
+    FastAPIInstrumentor.instrument_app(app, excluded_urls="saude")
+    return app
 
 
 def main() -> None:
@@ -36,6 +41,7 @@ def main() -> None:
     config = ConfigAgente()
     if not config.cliente_segredo.get_secret_value():
         raise SystemExit("Defina BAZAR_AGENTE_CLIENTE_SEGREDO (segredo do cliente bazar-agente no Keycloak).")
+    configurar_rastreamento("bazar-agente")
     uvicorn.run(montar(config), host="0.0.0.0", port=8000, proxy_headers=True)  # noqa: S104 (container)
 
 

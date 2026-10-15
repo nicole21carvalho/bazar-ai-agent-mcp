@@ -1,0 +1,135 @@
+name: Avaliações com modelos de verdade
+
+# Os 16 cenários de avaliacao/cenarios.toml, com modelos do Ollama rodando na CPU
+# do runner (o PC de desenvolvimento não aguenta). Cada modelo é um job; no fim,
+# uma tabela compara acerto, tempo e tokens.
+on:
+  workflow_dispatch:
+    inputs:
+      modelos:
+        description: "Modelos do Ollama (lista JSON)"
+        default: '["qwen3:1.7b", "llama3.2:3b", "qwen3:4b", "qwen3:8b"]'
+  # Mudou o prompt, o grafo, as ferramentas ou os cenários: avalia de novo.
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/bazar_agente/agente/**"
+      - "src/bazar_agente/mcp_bazar/servidor.py"
+      - "src/bazar_agente/bazar/modelos.py"
+      - "avaliacao/**"
+      - ".github/workflows/avaliacoes.yml"
+  # E toda segunda-feira (6h em Brasília), para pegar mudança nos modelos ou no Ollama.
+  schedule:
+    - cron: "0 9 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: avaliacoes-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # O modelo que o agente usa por padrão: só ele precisa passar na régua.
+  MODELO_PADRAO: qwen3:4b
+
+jobs:
+  modelo:
+    name: ${{ matrix.modelo }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    strategy:
+      # Um modelo que reprova não esconde o resultado dos outros.
+      fail-fast: false
+      matrix:
+        modelo: ${{ fromJSON(inputs.modelos || '["qwen3:1.7b", "llama3.2:3b", "qwen3:4b", "qwen3:8b"]') }}
+    env:
+      MODELO: ${{ matrix.modelo }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          python-version: "3.14"
+          enable-cache: true
+
+      - run: uv sync --frozen
+
+      - name: Instalar o Ollama (binário oficial, com checksum)
+        env:
+          OLLAMA_VERSAO: v0.35.1
+          OLLAMA_SHA256: 9fcd79ac4575b2bd31b992eee18b1000c8ad126b451627c8f8cd091714cfbb10
+        run: |
+          curl -sSfL -o ollama.tar.zst \
+            "https://github.com/ollama/ollama/releases/download/${OLLAMA_VERSAO}/ollama-linux-amd64.tar.zst"
+          echo "${OLLAMA_SHA256}  ollama.tar.zst" | sha256sum --check --strict
+          mkdir -p "$RUNNER_TEMP/ollama"
+          # Sem as bibliotecas de GPU: o runner não tem placa de vídeo, e o disco é curto.
+          tar --zstd -xf ollama.tar.zst -C "$RUNNER_TEMP/ollama" \
+            --wildcards --exclude='*cuda*' --exclude='*rocm*' --exclude='*vulkan*'
+          rm ollama.tar.zst
+          echo "$RUNNER_TEMP/ollama/bin" >> "$GITHUB_PATH"
+
+      - name: Subir o Ollama e baixar o modelo
+        env:
+          OLLAMA_NUM_PARALLEL: "1"
+          OLLAMA_MODELS: ${{ runner.temp }}/modelos
+        run: |
+          nohup ollama serve > "$RUNNER_TEMP/ollama.log" 2>&1 &
+          for _ in $(seq 1 30); do curl -sf http://127.0.0.1:11434/api/version > /dev/null && break; sleep 1; done
+          # O registro do Ollama às vezes responde 503: até três tentativas.
+          for tentativa in 1 2 3; do
+            ollama pull "$MODELO" && exit 0
+            sleep $((tentativa * 15))
+          done
+          exit 1
+
+      - name: Rodar os cenários
+        run: |
+          arquivo="resultados/$(echo "$MODELO" | tr ':/' '--').json"
+          regua=()
+          if [ "$MODELO" = "$MODELO_PADRAO" ]; then
+            # Segurança é obrigatória; o resto, uma taxa mínima de acerto.
+            regua=(--exigir seguranca --minimo 0.7)
+          fi
+          uv run python -m avaliacao rodar --modelo "$MODELO" --saida "$arquivo" "${regua[@]}"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: avaliacao-${{ strategy.job-index }}
+          path: resultados/
+          if-no-files-found: ignore
+
+      - name: Log do Ollama (se algo deu errado)
+        if: failure()
+        run: tail -n 100 "$RUNNER_TEMP/ollama.log"
+
+  comparacao:
+    name: Comparação dos modelos
+    needs: modelo
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          python-version: "3.14"
+          enable-cache: true
+
+      - run: uv sync --frozen
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: avaliacao-*
+          path: resultados
+          merge-multiple: true
+
+      - name: Tabela comparativa
+        run: uv run python -m avaliacao comparar resultados/*.json --saida resultados/comparacao.md
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: comparacao
+          path: resultados/

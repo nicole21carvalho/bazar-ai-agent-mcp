@@ -10,3 +10,6 @@ __pycache__/
 .ruff_cache/
 .pytest_cache/
 dist/
+
+# Saida das avaliacoes (no CI vira artefato)
+resultados/

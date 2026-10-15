@@ -12,6 +12,7 @@ from starlette.applications import Starlette
 from bazar_agente.bazar.cliente import ClienteBazar
 from bazar_agente.config import ConfigMCP
 from bazar_agente.mcp_bazar.servidor import criar_servidor
+from bazar_agente.observabilidade import configurar_rastreamento
 from bazar_agente.seguranca.tokens import TrocaDeToken, VerificadorJWT
 
 TIMEOUT = httpx.Timeout(10.0, connect=3.0)
@@ -61,6 +62,9 @@ def main() -> None:
     config = ConfigMCP()
     if not config.cliente_segredo.get_secret_value():
         raise SystemExit("Defina BAZAR_MCP_CLIENTE_SEGREDO (segredo do cliente bazar-mcp no Keycloak).")
+    # O próprio SDK do MCP cria o span de cada chamada (continuando o trace do agente);
+    # daqui, as chamadas ao Bazar levam o "traceparent" adiante.
+    configurar_rastreamento("bazar-mcp")
     uvicorn.run(criar_app(config), host="0.0.0.0", port=8090, proxy_headers=True)  # noqa: S104 (container)
 
 

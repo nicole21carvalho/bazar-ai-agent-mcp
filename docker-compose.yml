@@ -12,11 +12,11 @@ x-seguro: &seguro
   security_opt: ["no-new-privileges:true"]
   tmpfs: ["/tmp"]
 
-x-keycloak: &keycloak
-  # O "iss" dos tokens é o endereço que o navegador usa; as chaves e as trocas de
-  # token vão pelo endereço interno.
-  EMISSOR: http://localhost:8180/realms/bazar
-  KEYCLOAK_INTERNO: http://keycloak:8080/realms/bazar
+# Traces no mesmo Jaeger do Bazar (http://localhost:16686): uma mensagem no chat
+# aparece num trace só, do modelo de linguagem até a saga no Kafka. Para desligar,
+# deixe OTEL_ENDPOINT vazio no .env.
+x-rastreamento: &rastreamento
+  OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_ENDPOINT-http://jaeger:4318}
 
 services:
   # Roda uma vez: cria (ou acerta) os clientes do agente e do servidor MCP no
@@ -39,6 +39,7 @@ services:
     <<: *seguro
     command: ["bazar_agente.mcp_bazar"]
     environment:
+      <<: *rastreamento
       BAZAR_MCP_API_URL: http://gateway:8080
       BAZAR_MCP_URL_PUBLICA: http://mcp:8090/mcp
       BAZAR_MCP_EMISSOR: http://localhost:8180/realms/bazar
@@ -57,6 +58,7 @@ services:
     build: .
     <<: *seguro
     environment:
+      <<: *rastreamento
       BAZAR_AGENTE_MCP_URL: http://mcp:8090/mcp
       BAZAR_AGENTE_EMISSOR: http://localhost:8180/realms/bazar
       BAZAR_AGENTE_KEYCLOAK_INTERNO: http://keycloak:8080/realms/bazar
