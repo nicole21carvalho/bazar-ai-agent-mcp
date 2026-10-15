@@ -40,6 +40,14 @@ def _mostrar(resultado: ResultadoCenario) -> None:
     segundos = sum(t.segundos for t in resultado.turnos)
     marca = "ok   " if resultado.passou else "FALHA"
     print(f"{marca} {resultado.nome} ({segundos:.0f} s) {'; '.join(falhas)}", file=sys.stderr, flush=True)
+    if not resultado.passou:
+        # As conversas são sintéticas: mostrar o que o modelo fez ajuda a entender a falha no log do CI.
+        for turno in resultado.turnos:
+            resposta = " ".join(turno.resposta.split())[:240] or "(sem texto)"
+            print(
+                f"        cliente: {turno.cliente} | pediu: {turno.ferramentas} | disse: {resposta}",
+                file=sys.stderr,
+            )
 
 
 def rodar(args: argparse.Namespace) -> int:
