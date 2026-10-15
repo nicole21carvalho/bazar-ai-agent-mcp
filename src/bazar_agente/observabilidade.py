@@ -1,9 +1,9 @@
 """Rastreamento distribuído (OpenTelemetry): um trace por mensagem do cliente.
 
-    API do agente ─ invoke_agent ─┬─ chat qwen3:4b                (o modelo pensou)
+    API do agente ─ invoke_agent ─┬─ chat qwen3:4b-instruct                (o modelo pensou)
                                   ├─ execute_tool consultar_pedido
                                   │    └─ MCP → servidor MCP ─ tools/call → gateway do Bazar → serviços
-                                  └─ chat qwen3:4b                (o modelo respondeu)
+                                  └─ chat qwen3:4b-instruct                (o modelo respondeu)
 
 O SDK do MCP já cria os spans das chamadas MCP e leva o contexto do trace dentro da
 própria mensagem (`_meta`); o servidor MCP passa o contexto ao Bazar pelo cabeçalho

@@ -8,7 +8,7 @@ on:
     inputs:
       modelos:
         description: "Modelos do Ollama (lista JSON)"
-        default: '["qwen3:1.7b", "llama3.2:3b", "qwen3:4b", "qwen3:8b"]'
+        default: '["qwen3:1.7b", "llama3.2:3b", "qwen3:4b-instruct", "qwen3:8b"]'
   # Mudou o prompt, o grafo, as ferramentas ou os cenários: avalia de novo.
   pull_request:
     branches: [main]
@@ -31,7 +31,7 @@ concurrency:
 
 env:
   # O modelo que o agente usa por padrão: só ele precisa passar na régua.
-  MODELO_PADRAO: qwen3:4b
+  MODELO_PADRAO: qwen3:4b-instruct
 
 jobs:
   modelo:
@@ -42,7 +42,7 @@ jobs:
       # Um modelo que reprova não esconde o resultado dos outros.
       fail-fast: false
       matrix:
-        modelo: ${{ fromJSON(inputs.modelos || '["qwen3:1.7b", "llama3.2:3b", "qwen3:4b", "qwen3:8b"]') }}
+        modelo: ${{ fromJSON(inputs.modelos || '["qwen3:1.7b", "llama3.2:3b", "qwen3:4b-instruct", "qwen3:8b"]') }}
     env:
       MODELO: ${{ matrix.modelo }}
     steps:

@@ -1,6 +1,6 @@
 """Avaliações do atendente com um modelo de verdade.
 
-    uv run python -m avaliacao rodar --modelo qwen3:4b --saida resultados/qwen3-4b.json
+    uv run python -m avaliacao rodar --modelo qwen3:4b-instruct --saida resultados/qwen3-4b-instruct.json
     uv run python -m avaliacao comparar resultados/*.json
 
 `rodar` termina com erro se a taxa de acerto ficar abaixo de --minimo, ou se algum
@@ -102,7 +102,7 @@ def main() -> int:
     comandos = parser.add_subparsers(required=True)
 
     p_rodar = comandos.add_parser("rodar", help="roda os cenários com um modelo")
-    p_rodar.add_argument("--modelo", default="qwen3:4b")
+    p_rodar.add_argument("--modelo", default="qwen3:4b-instruct")
     p_rodar.add_argument("--provedor", default="ollama", choices=["ollama", "anthropic"])
     p_rodar.add_argument("--ollama-url", default=os.environ.get("OLLAMA_URL", "http://localhost:11434"))
     p_rodar.add_argument("--cenario", action="append", help="só este cenário (pode repetir)")

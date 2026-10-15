@@ -56,7 +56,7 @@ class ConfigAgente(_ComKeycloak, env_prefix="BAZAR_AGENTE_", extra="ignore"):
 
     # Modelo de linguagem: "ollama" (local, gratuito) ou "anthropic" (com chave).
     provedor: str = "ollama"
-    modelo: str = "qwen3:4b"
+    modelo: str = "qwen3:4b-instruct"
     ollama_url: AnyHttpUrl = AnyHttpUrl("http://localhost:11434")
     anthropic_chave: SecretStr = SecretStr("")
 

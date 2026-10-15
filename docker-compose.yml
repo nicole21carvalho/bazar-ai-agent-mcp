@@ -64,7 +64,7 @@ services:
       BAZAR_AGENTE_KEYCLOAK_INTERNO: http://keycloak:8080/realms/bazar
       BAZAR_AGENTE_CLIENTE_SEGREDO: ${AGENTE_SEGREDO:?defina no .env}
       BAZAR_AGENTE_PROVEDOR: ${PROVEDOR:-ollama}
-      BAZAR_AGENTE_MODELO: ${MODELO:-qwen3:4b}
+      BAZAR_AGENTE_MODELO: ${MODELO:-qwen3:4b-instruct}
       BAZAR_AGENTE_ANTHROPIC_CHAVE: ${ANTHROPIC_CHAVE:-}
       BAZAR_AGENTE_OLLAMA_URL: http://ollama:11434
       BAZAR_AGENTE_ORIGENS_CORS: '["http://localhost:5173"]'
@@ -104,7 +104,7 @@ services:
     security_opt: ["no-new-privileges:true"]
     environment:
       OLLAMA_HOST: ollama:11434
-      MODELO: ${MODELO:-qwen3:4b}
+      MODELO: ${MODELO:-qwen3:4b-instruct}
     entrypoint: ["sh", "-c", "ollama show \"$$MODELO\" >/dev/null 2>&1 || ollama pull \"$$MODELO\""]
     depends_on:
       ollama:
