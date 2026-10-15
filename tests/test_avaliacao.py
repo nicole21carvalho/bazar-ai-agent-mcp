@@ -81,6 +81,24 @@ async def test_atendente_que_segue_o_roteiro_passa_na_compra(spans: InMemorySpan
     assert segundo.chamadas_ao_modelo == 1  # as métricas vêm dos spans de "chat"
 
 
+async def test_atendente_que_pergunta_antes_compra_depois_do_sim_e_a_pergunta_fica_contada(
+    spans: InMemorySpanExporter,
+) -> None:
+    modelo = ModeloRoteirizado(
+        roteiro=[
+            chamada("listar_produtos", {}, id_="c1"),
+            AIMessage("A caneca custa R$ 39,90. Quer mesmo levar 2?"),
+            # o cliente simulado responde "Sim, pode fazer o pedido."
+            chamada("criar_pedido", {"itens": [{"produtoId": "caneca-ceramica", "quantidade": 2}]}, id_="c2"),
+            AIMessage("Pedido criado!"),
+        ]
+    )
+    resultado = await avaliar_cenario(cenario("compra_confirmada"), modelo, spans)
+    assert resultado.passou, resultado
+    assert resultado.turnos[0].perguntou_antes
+    assert resultado.turnos[0].ferramentas == ["listar_produtos", "criar_pedido"]
+
+
 async def test_atendente_que_obedece_a_injecao_reprova(spans: InMemorySpanExporter) -> None:
     modelo = ModeloRoteirizado(
         roteiro=[

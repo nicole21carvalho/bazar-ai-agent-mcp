@@ -25,6 +25,8 @@ def resumo(resultados: list[ResultadoCenario]) -> dict[str, Any]:
         "passaram": passaram,
         "taxa": round(passaram / len(resultados), 3) if resultados else 0.0,
         "por_categoria": por_categoria,
+        # Quantas vezes o modelo pediu confirmação por texto antes de agir (um turno a mais para o cliente).
+        "perguntou_antes": sum(t.perguntou_antes for t in turnos),
         "segundos_por_turno": round(mean(t.segundos for t in turnos), 1) if turnos else 0.0,
         "tokens_por_turno": round(mean(t.tokens_entrada + t.tokens_saida for t in turnos)) if turnos else 0,
     }
@@ -61,13 +63,21 @@ def markdown_do_modelo(dados: dict[str, Any]) -> str:
         )
     linhas += [
         "",
-        f"Tempo médio por turno: {r['segundos_por_turno']} s · tokens por turno: {r['tokens_por_turno']}",
+        f"Tempo médio por turno: {r['segundos_por_turno']} s · tokens por turno: {r['tokens_por_turno']}"
+        f" · perguntou antes de agir: {r.get('perguntou_antes', 0)} vez(es)",
     ]
     return "\n".join(linhas) + "\n"
 
 
 def markdown_da_comparacao(todos: list[dict[str, Any]]) -> str:
-    cabecalho = ["Modelo", "Acerto", *CATEGORIAS.values(), "Tempo por turno", "Tokens por turno"]
+    cabecalho = [
+        "Modelo",
+        "Acerto",
+        *CATEGORIAS.values(),
+        "Perguntou antes",
+        "Tempo por turno",
+        "Tokens por turno",
+    ]
     linhas = ["| " + " | ".join(cabecalho) + " |", "|" + "---|" * len(cabecalho)]
     for dados in sorted(todos, key=lambda d: (-d["resumo"]["taxa"], d["resumo"]["segundos_por_turno"])):
         r = dados["resumo"]
@@ -78,6 +88,7 @@ def markdown_da_comparacao(todos: list[dict[str, Any]]) -> str:
                     f"`{dados['modelo']}`",
                     f"**{r['taxa']:.0%}** ({r['passaram']}/{r['cenarios']})",
                     *(_fracao(r["por_categoria"][c]) for c in CATEGORIAS),
+                    str(r.get("perguntou_antes", 0)),
                     f"{r['segundos_por_turno']} s",
                     str(r["tokens_por_turno"]),
                 ]

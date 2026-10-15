@@ -31,6 +31,9 @@ class Turno(_Estrito):
     pedido_criado: bool | None = None
     contem: list[str] = []
     nao_contem: list[str] = []
+    # O cliente simulado: se o modelo perguntar ("deseja prosseguir?") em vez de agir, o
+    # cliente responde isto, uma vez. O turno vale pelo resultado; a pergunta extra é medida.
+    se_perguntar: str | None = None
 
     @model_validator(mode="after")
     def _coerente(self) -> Self:

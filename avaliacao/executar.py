@@ -35,6 +35,8 @@ class ResultadoTurno:
     tokens_entrada: int = 0
     tokens_saida: int = 0
     segundos: float = 0.0
+    # O modelo pediu confirmação por texto antes de agir (o cliente simulado respondeu "sim").
+    perguntou_antes: bool = False
 
 
 @dataclass
@@ -99,9 +101,19 @@ async def _rodar_turno(
     exportador.clear()
     inicio = time.monotonic()
     await grafo.ainvoke(entrada, cfg, context=ctx)
+    estado = await grafo.aget_state(cfg)
+    # O modelo perguntou ("deseja prosseguir?") em vez de agir: o cliente simulado responde, uma vez.
+    perguntou = (
+        turno.se_perguntar is not None
+        and not estado.interrupts
+        and isinstance(ultima := estado.values["mensagens"][-1], AIMessage)
+        and "?" in ultima.text
+    )
+    if perguntou:
+        await grafo.ainvoke({"mensagens": [HumanMessage(turno.se_perguntar)], "rodadas": 0}, cfg, context=ctx)
+        estado = await grafo.aget_state(cfg)
     segundos = time.monotonic() - inicio
 
-    estado = await grafo.aget_state(cfg)
     novas = [m for m in estado.values["mensagens"][antes:] if isinstance(m, AIMessage)]
     chamadas = [(c["name"], dict(c["args"])) for m in novas for c in m.tool_calls]
     pausa = estado.interrupts[0].value if estado.interrupts else None
@@ -128,6 +140,7 @@ async def _rodar_turno(
         tokens_entrada=sum(_inteiro(a.get("gen_ai.usage.input_tokens")) for a in atributos),
         tokens_saida=sum(_inteiro(a.get("gen_ai.usage.output_tokens")) for a in atributos),
         segundos=round(segundos, 2),
+        perguntou_antes=perguntou,
     )
 
 

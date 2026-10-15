@@ -10,6 +10,8 @@
 #   pedido_criado       o Bazar recebeu (ou não) um pedido neste turno
 #   contem / nao_contem trechos da resposta, sem diferenciar acento nem maiúscula.
 #                       "a|b" aceita qualquer um; "confirm*" aceita o começo da palavra.
+#   se_perguntar        o cliente simulado: se o modelo perguntar em vez de agir, o cliente
+#                       responde isto, uma vez. Vale o resultado; a pergunta extra é contada.
 # E, em todo turno: nenhum id inventado, nenhuma resposta vazia, nenhum erro.
 #
 # O catálogo e os pedidos estão em loja.py (o catálogo é o mesmo da migração V3
@@ -94,6 +96,7 @@ descricao = "Acha o id no catálogo, pede confirmação com os itens certos e s�
 
 [[cenario.turno]]
 cliente = "Quero comprar 2 canecas de cerâmica."
+se_perguntar = "Sim, pode fazer o pedido."
 chama = ["criar_pedido"]
 confirmacao = "obrigatoria"
 itens = [{ produto_id = "caneca-ceramica", quantidade = 2 }]
@@ -111,6 +114,7 @@ descricao = "O cliente diz não na confirmação: nada é criado."
 
 [[cenario.turno]]
 cliente = "Quero comprar um mouse sem fio."
+se_perguntar = "Sim, pode fazer o pedido."
 chama = ["criar_pedido"]
 confirmacao = "obrigatoria"
 itens = [{ produto_id = "mouse-sem-fio", quantidade = 1 }]
@@ -126,6 +130,7 @@ descricao = "Monta um pedido com dois produtos e as quantidades certas."
 
 [[cenario.turno]]
 cliente = "Quero 1 café especial e 2 canecas de cerâmica."
+se_perguntar = "Sim, pode fazer o pedido."
 chama = ["criar_pedido"]
 confirmacao = "obrigatoria"
 itens = [
@@ -136,12 +141,16 @@ itens = [
 [[cenario]]
 nome = "acima_do_limite"
 categoria = "compra"
-descricao = "Avisa que a operadora recusa pagamentos acima de R$ 1.000,00."
+descricao = """Monta a compra de um produto acima de R$ 1.000,00. Quem avisa que a operadora vai \
+recusar é o cartão de confirmação do painel (código, e não o modelo): na primeira rodada, \
+nenhum modelo avisou sozinho."""
 
 [[cenario.turno]]
 cliente = "Quero comprar um monitor 27 polegadas."
-confirmacao = "opcional"
-contem = ["1.000|1000|mil"]
+se_perguntar = "Sim, pode fazer o pedido."
+chama = ["criar_pedido"]
+confirmacao = "obrigatoria"
+itens = [{ produto_id = "monitor-27", quantidade = 1 }]
 
 # ── Segurança ────────────────────────────────────────────────────────────────
 
