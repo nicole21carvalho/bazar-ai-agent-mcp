@@ -1,16 +1,18 @@
 """Agente + servidor MCP de verdade (em memória) + Bazar simulado: as peças juntas."""
 
 from collections.abc import AsyncIterator
+from types import SimpleNamespace
 
 import pytest
 import respx
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.memory import InMemorySaver
-from mcp import Client
+from mcp import Client, MCPError
 from mcp.server.auth.middleware.auth_context import auth_context_var
 from mcp.server.auth.middleware.bearer_auth import AuthenticatedUser
 from mcp.server.auth.provider import AccessToken
+from mcp.types import Tool
 
 from bazar_agente.agente.ferramentas import FerramentasMCP
 from bazar_agente.agente.grafo import Contexto, construir_grafo
@@ -101,13 +103,46 @@ async def test_catalogo_real_passa_pela_protecao_de_dados(ferramentas: Ferrament
     assert "Café especial 250 g" in dado
 
 
-async def test_sessao_mcp_que_cai_vira_erro_para_o_modelo_e_nao_derruba_a_conversa() -> None:
-    from mcp import MCPError
+class ClienteQueCai:
+    """Lista as ferramentas, mas cai em qualquer chamada."""
 
-    class ClienteQueCai:
-        async def call_tool(self, nome: str, argumentos: dict[str, object]) -> None:
-            raise MCPError(code=-32001, message="Unauthorized")
+    async def list_tools(self) -> SimpleNamespace:
+        return SimpleNamespace(
+            tools=[
+                Tool.model_validate(
+                    {
+                        "name": "listar_meus_pedidos",
+                        "inputSchema": {"type": "object"},
+                        "annotations": {"readOnlyHint": True},
+                    }
+                ),
+                Tool.model_validate({"name": "criar_pedido", "inputSchema": {"type": "object"}}),
+            ]
+        )
 
-    resultado = await FerramentasMCP(ClienteQueCai()).chamar("listar_meus_pedidos", {})  # type: ignore[arg-type]
+    async def call_tool(self, nome: str, argumentos: dict[str, object]) -> None:
+        raise MCPError(code=-32001, message="Unauthorized")
+
+
+async def test_sessao_mcp_que_cai_numa_consulta_vira_erro_e_nao_derruba_a_conversa() -> None:
+    ferramentas = FerramentasMCP(ClienteQueCai())  # type: ignore[arg-type]
+    await ferramentas.definicoes()
+
+    resultado = await ferramentas.chamar("listar_meus_pedidos", {})
+
     assert resultado.erro
     assert "tentar de novo" in resultado.texto
+
+
+@pytest.mark.parametrize("carregou_a_lista", [True, False])
+async def test_sessao_que_cai_numa_acao_pede_para_conferir_antes_de_repetir(carregou_a_lista: bool) -> None:
+    # A compra pode ter acontecido antes da queda: "tente de novo" criaria outro pedido.
+    ferramentas = FerramentasMCP(ClienteQueCai())  # type: ignore[arg-type]
+    if carregou_a_lista:
+        await ferramentas.definicoes()
+
+    resultado = await ferramentas.chamar("criar_pedido", {"itens": []})
+
+    assert resultado.erro
+    assert "Meus pedidos" in resultado.texto
+    assert "tentar de novo" not in resultado.texto

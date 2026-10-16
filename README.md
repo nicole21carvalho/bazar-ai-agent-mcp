@@ -39,6 +39,13 @@ docker compose up -d --build
 
 Abra o painel em http://localhost:5173, entre e clique em **💬 Atendimento**.
 
+<p align="center">
+  <img src="docs/img/chat-confirmacao.png" alt="Chat do atendimento no painel do Bazar: o cliente pede 2 cafés especiais e o app mostra o cartão Confirmar este pedido, com 2 cafés por R$ 85,80 e os botões Confirmar pedido e Não" width="380">
+</p>
+
+Toda compra passa por este cartão: o modelo propõe o pedido, mas ele só é criado depois do clique em
+**Confirmar pedido**. Os itens e o total vêm da chamada da ferramenta e do catálogo, e não do texto do modelo.
+
 ## Agente (LangGraph)
 
 ```
@@ -67,6 +74,11 @@ START → modelo ─(pediu ferramentas)→ ferramentas → modelo → ... → EN
 - **Sem repassar o token do cliente**: antes de chamar o Bazar, troca o token por outro, válido só para a
   API (OAuth Token Exchange, RFC 8693). O agente faz o mesmo para falar com o servidor MCP.
 - Entradas validadas antes de qualquer chamada, com as mesmas regras do Bazar.
+- **Criar pedido é seguro de repetir**: cada pedido leva uma `Idempotency-Key`. Se a resposta do Bazar não
+  chega (timeout, gateway que desistiu), o servidor tenta de novo até 3 vezes com a **mesma** chave, e o Bazar
+  devolve o pedido que já criou em vez de criar outro. Se nada responder, a mensagem manda conferir "Meus
+  pedidos" antes de pedir de novo, e não "tente de novo". O agente faz o mesmo quando a sessão MCP cai no meio
+  de uma ação.
 
 ## Avaliações com modelos de verdade
 
@@ -159,6 +171,14 @@ POST /api/conversas/{id}/mensagens                       agente
    └─ chat qwen3:4b-instruct
 ```
 
+<p align="center">
+  <img src="docs/img/jaeger-trace-agente.png" alt="Trace no Jaeger da confirmação de uma compra: bazar-agente, bazar-mcp, gateway e pedidos numa árvore só, com 6 serviços e 70 spans" width="900">
+</p>
+
+Foi um trace assim que achou um bug: com o Bazar lento, o pedido era criado, mas o servidor MCP desistia de esperar
+aos 10 s e o agente dizia que tinha dado erro (e um "tente de novo" criaria outro pedido). Daí veio a
+`Idempotency-Key` descrita em [Servidor MCP](#servidor-mcp) e a criação idempotente no próprio Bazar.
+
 - Os spans seguem as convenções de **GenAI do OpenTelemetry** (`gen_ai.operation.name`,
   `gen_ai.request.model`, `gen_ai.usage.input_tokens`, `gen_ai.tool.name`...).
 - **Do agente ao servidor MCP**, o contexto do trace vai dentro da própria mensagem MCP (`_meta`), pelo SDK do
@@ -174,6 +194,6 @@ POST /api/conversas/{id}/mensagens                       agente
 
 ```bash
 uv sync --all-extras
-uv run pytest          # 86 testes, com um modelo "roteirizado" (sem IA de verdade)
+uv run pytest          # 93 testes, com um modelo "roteirizado" (sem IA de verdade)
 uv run ruff check . && uv run mypy src tests avaliacao
 ```

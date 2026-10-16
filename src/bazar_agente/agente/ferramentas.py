@@ -75,12 +75,23 @@ class FerramentasMCP:
         except (MCPError, httpx2.HTTPError) as erro:
             # Sessão expirada ou servidor fora do ar: o modelo explica ao cliente, em
             # vez de a conversa cair inteira.
+            if not self._so_le(nome):
+                # A ação pode ter acontecido antes da falha: mandar repetir criaria outra.
+                return Resultado(
+                    texto=f"A loja não respondeu ({type(erro).__name__}) e não deu para confirmar se a ação "
+                    "aconteceu. Peça ao cliente para conferir em “Meus pedidos” antes de pedir de novo.",
+                    erro=True,
+                )
             return Resultado(
                 texto=f"Não consegui falar com a loja agora ({type(erro).__name__}). "
                 "Peça ao cliente para tentar de novo em instantes.",
                 erro=True,
             )
         return Resultado(texto=_texto(resultado), erro=bool(resultado.is_error))
+
+    def _so_le(self, nome: str) -> bool:
+        # Sem a lista (ou sem a ferramenta nela), vale o padrão seguro: é uma ação.
+        return any(d.nome == nome and d.somente_leitura for d in self._definicoes or [])
 
 
 def _texto(resultado: CallToolResult) -> str:
@@ -95,7 +106,8 @@ async def sessao_mcp(url: str, token: str) -> AsyncIterator[FerramentasMCP]:
     """Abre uma sessão MCP por Streamable HTTP com o token (já trocado) do cliente."""
     cabecalhos = {"Authorization": f"Bearer {token}"}
     async with (
-        httpx2.AsyncClient(headers=cabecalhos, timeout=httpx2.Timeout(30.0, connect=5.0)) as http,
+        # 60 s: a criação de pedido no servidor MCP pode tentar até 3 vezes (veja ClienteBazar).
+        httpx2.AsyncClient(headers=cabecalhos, timeout=httpx2.Timeout(60.0, connect=5.0)) as http,
         Client(streamable_http_client(url, http_client=http)) as cliente,
     ):
         yield FerramentasMCP(cliente)

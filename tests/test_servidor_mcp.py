@@ -1,5 +1,6 @@
 """Servidor MCP do Bazar visto por um cliente MCP de verdade."""
 
+import re
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -47,7 +48,7 @@ class TrocadorFalso:
 
 def servidor_de_teste(trocador: TrocadorFalso) -> Any:
     return criar_servidor(
-        cliente=ClienteBazar(httpx.AsyncClient(base_url=API_URL)),
+        cliente=ClienteBazar(httpx.AsyncClient(base_url=API_URL), pausa_entre_tentativas=0),
         trocador=trocador,
         verificador=VerificadorJWT(httpx.AsyncClient(), CHAVES_URL, EMISSOR, "bazar-mcp", URL_MCP),
         emissor=AnyHttpUrl(EMISSOR),
@@ -130,6 +131,8 @@ async def test_criar_pedido_envia_os_itens_no_formato_do_bazar(cliente_mcp: Clie
         )
     assert not resultado.is_error
     assert rota.calls.last.request.read() == b'{"itens":[{"produtoId":"cafe-especial","quantidade":2}]}'
+    # O formato que o Bazar aceita: de 8 a 100 letras, números, "-" ou "_".
+    assert re.fullmatch(r"[A-Za-z0-9_-]{8,100}", rota.calls.last.request.headers["Idempotency-Key"])
 
 
 @pytest.mark.parametrize(
@@ -192,11 +195,56 @@ async def test_leitura_que_falha_na_rede_tenta_de_novo_uma_vez(cliente_mcp: Clie
     assert not resultado.is_error
 
 
-async def test_criacao_que_falha_na_rede_nao_repete_para_nao_duplicar_o_pedido(cliente_mcp: Client) -> None:
+UM_CAFE = {"itens": [{"produto_id": "cafe-especial", "quantidade": 1}]}
+
+
+def chaves(rota: respx.Route) -> list[str]:
+    return [chamada.request.headers["Idempotency-Key"] for chamada in rota.calls]
+
+
+@pytest.mark.parametrize(
+    "falha",
+    [httpx.ReadTimeout("lento"), httpx.Response(504), httpx.Response(503)],
+    ids=["sem-resposta", "gateway-desistiu", "servico-reiniciando"],
+)
+async def test_criacao_sem_resposta_repete_com_a_mesma_chave_e_devolve_o_pedido(
+    cliente_mcp: Client, falha: httpx.Response | Exception
+) -> None:
+    # O Bazar pode ter criado o pedido antes de a resposta se perder: a mesma chave
+    # faz ele devolver esse pedido em vez de criar outro.
+    with respx.mock(base_url=API_URL) as bazar:
+        rota = bazar.post("/api/pedidos").mock(
+            side_effect=[falha, httpx.Response(202, json=PEDIDO, headers={"Idempotent-Replayed": "true"})]
+        )
+        resultado = await cliente_mcp.call_tool("criar_pedido", UM_CAFE)
+    assert not resultado.is_error
+    assert rota.call_count == 2
+    assert len(set(chaves(rota))) == 1
+
+
+async def test_criacao_que_nunca_responde_pede_para_conferir_antes_de_repetir(cliente_mcp: Client) -> None:
     with respx.mock(base_url=API_URL) as bazar:
         rota = bazar.post("/api/pedidos").mock(side_effect=httpx.ReadTimeout("lento"))
-        resultado = await cliente_mcp.call_tool(
-            "criar_pedido", {"itens": [{"produto_id": "cafe-especial", "quantidade": 1}]}
-        )
+        resultado = await cliente_mcp.call_tool("criar_pedido", UM_CAFE)
+    assert resultado.is_error
+    texto = str(resultado.content)
+    assert "Meus pedidos" in texto
+    assert "Tente de novo" not in texto
+    assert rota.call_count == 3
+    assert len(set(chaves(rota))) == 1
+
+
+async def test_cada_pedido_novo_leva_uma_chave_diferente(cliente_mcp: Client) -> None:
+    with respx.mock(base_url=API_URL) as bazar:
+        rota = bazar.post("/api/pedidos").respond(202, json=PEDIDO)
+        await cliente_mcp.call_tool("criar_pedido", UM_CAFE)
+        await cliente_mcp.call_tool("criar_pedido", UM_CAFE)
+    assert len(set(chaves(rota))) == 2
+
+
+async def test_criacao_recusada_pelo_bazar_nao_repete(cliente_mcp: Client) -> None:
+    with respx.mock(base_url=API_URL) as bazar:
+        rota = bazar.post("/api/pedidos").respond(422)
+        resultado = await cliente_mcp.call_tool("criar_pedido", UM_CAFE)
     assert resultado.is_error
     assert rota.call_count == 1
