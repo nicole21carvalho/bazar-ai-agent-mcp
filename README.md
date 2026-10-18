@@ -7,6 +7,22 @@ servidor **MCP** (Model Context Protocol) próprio.
 > Servidor MCP próprio com troca de token (RFC 8693), agente LangGraph com confirmação humana, integração com o
 > Bazar, avaliações com modelos de verdade no CI (94% no modelo padrão) e rastreamento OpenTelemetry.
 
+## 🌎 In English
+
+An AI customer-service agent for the Bazar store: it checks orders, shows the catalog and places orders **on behalf
+of the logged-in customer**, through a custom **MCP** (Model Context Protocol) server.
+
+- **No token passthrough**: every hop exchanges the token for one that is valid only for the next service (OAuth 2.0
+  Token Exchange, RFC 8693, with Keycloak).
+- **Human in the loop**: any tool that changes data pauses the LangGraph graph until the customer confirms in the app.
+- **Evaluated with real models in CI**: 16 scenarios on Ollama; the default model (`qwen3:4b-instruct`) scores
+  **94% (15/16)**.
+- **End-to-end OpenTelemetry tracing** (GenAI semantic conventions), from the chat to the store's services. A trace
+  exposed a duplicate-order bug, fixed with an `Idempotency-Key`.
+- 93 tests and mypy in strict mode. *Python 3.14 · LangGraph · MCP · FastAPI · Ollama · Keycloak · OpenTelemetry.*
+
+*The rest of this README is in Portuguese.*
+
 ## Como as peças se encaixam
 
 ```
