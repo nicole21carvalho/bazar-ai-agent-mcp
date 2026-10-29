@@ -83,7 +83,7 @@ services:
 
   # Modelo de linguagem local. Sem placa de vídeo, responde em dezenas de segundos.
   ollama:
-    image: ollama/ollama:0.35.1
+    image: ollama/ollama:0.40.11
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     volumes:
@@ -99,7 +99,7 @@ services:
   # Baixa o modelo só se ele ainda não estiver no volume: depois da primeira vez,
   # sobe até sem internet.
   ollama-modelo:
-    image: ollama/ollama:0.35.1
+    image: ollama/ollama:0.40.11
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     environment:
